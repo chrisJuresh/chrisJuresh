@@ -1,0 +1,95 @@
+name: Refresh portfolio preview
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [portfolio-updated]
+  schedule:
+    - cron: "*/10 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: portfolio-preview
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out profile repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check portfolio revision
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_sha="$(git ls-remote https://github.com/chrisJuresh/portfolio.git refs/heads/main | cut -f1)"
+          if [[ -z "$source_sha" ]]; then
+            echo "Could not resolve chrisJuresh/portfolio main." >&2
+            exit 1
+          fi
+
+          recorded_sha=""
+          if [[ -f assets/portfolio-preview-source.txt ]]; then
+            recorded_sha="$(tr -d '\r\n' < assets/portfolio-preview-source.txt)"
+          fi
+
+          refresh=false
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" || "$GITHUB_EVENT_NAME" == "repository_dispatch" ]]; then
+            refresh=true
+          elif [[ ! -s assets/portfolio-preview.png || "$source_sha" != "$recorded_sha" ]]; then
+            refresh=true
+          fi
+
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "refresh=$refresh" >> "$GITHUB_OUTPUT"
+
+      - name: Allow the portfolio deployment to settle
+        if: steps.source.outputs.refresh == 'true' && github.event_name == 'schedule'
+        run: sleep 45
+
+      - name: Set up Node.js
+        if: steps.source.outputs.refresh == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install screenshot runtime
+        if: steps.source.outputs.refresh == 'true'
+        run: |
+          npm install --no-save --no-package-lock playwright@1.61.1
+          npx playwright install --with-deps chromium
+
+      - name: Capture live portfolio
+        if: steps.source.outputs.refresh == 'true'
+        env:
+          PORTFOLIO_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: node scripts/capture-portfolio.mjs
+
+      - name: Publish refreshed preview
+        if: steps.source.outputs.refresh == 'true'
+        env:
+          PORTFOLIO_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf '%s\n' "$PORTFOLIO_SOURCE_SHA" > assets/portfolio-preview-source.txt
+          git add README.md assets/portfolio-preview.png assets/portfolio-preview-source.txt
+
+          if git diff --cached --quiet; then
+            echo "Preview is already current."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh portfolio preview"
+          git push
