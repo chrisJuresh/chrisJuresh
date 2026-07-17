@@ -1,12 +1,19 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 
 const portfolioUrl = "https://chrisj.uk/portfolio";
-const previewPath = "assets/portfolio-preview.png";
 const sourceSha = process.env.PORTFOLIO_SOURCE_SHA || "manual";
 const cacheKey = process.env.PORTFOLIO_CACHE_KEY || sourceSha.slice(0, 12);
+const previewPath = `assets/portfolio-preview-${cacheKey}.png`;
 
 await mkdir("assets", { recursive: true });
+
+for (const entry of await readdir("assets")) {
+  const path = `assets/${entry}`;
+  if (/^portfolio-preview(?:-.+)?\.png$/.test(entry) && path !== previewPath) {
+    await rm(path);
+  }
+}
 
 const browser = await chromium.launch({ headless: true });
 
@@ -116,8 +123,8 @@ try {
 
   const readme = await readFile("README.md", "utf8");
   const updatedReadme = readme.replace(
-    /(portfolio-preview\.png\?v=)[^"')\s]+/g,
-    `$1${cacheKey}`,
+    /\.\/assets\/portfolio-preview(?:-[^"'?]+)?\.png(?:\?v=[^"')\s]+)?/g,
+    `./${previewPath}`,
   );
 
   if (updatedReadme !== readme) {

@@ -83,7 +83,7 @@ jobs:
           set -euo pipefail
 
           printf '%s\n' "$PORTFOLIO_SOURCE_SHA" > assets/portfolio-preview-source.txt
-          git add README.md assets/portfolio-preview.png assets/portfolio-preview-source.txt
+          git add -A -- README.md assets
 
           if git diff --cached --quiet; then
             echo "Preview is already current."
