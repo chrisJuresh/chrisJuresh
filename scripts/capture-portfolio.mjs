@@ -31,13 +31,18 @@ try {
     if (document.fonts?.ready) await document.fonts.ready;
   });
 
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll(".track img"))
+      .slice(0, 3)
+      .forEach((image) => { image.loading = "eager"; });
+  });
+
   await page.waitForFunction(
-    () => Array.from(document.images)
-      .filter((image) => {
-        const rect = image.getBoundingClientRect();
-        return rect.bottom > 0 && rect.top < window.innerHeight;
-      })
-      .every((image) => image.complete && image.naturalWidth > 0),
+    () => {
+      const previewImages = Array.from(document.querySelectorAll(".track img")).slice(0, 3);
+      return previewImages.length === 3
+        && previewImages.every((image) => image.complete && image.naturalWidth > 0);
+    },
     undefined,
     { timeout: 30_000 },
   );
