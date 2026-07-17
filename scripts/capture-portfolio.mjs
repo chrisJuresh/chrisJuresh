@@ -4,6 +4,7 @@ import { chromium } from "playwright";
 const portfolioUrl = "https://chrisj.uk/portfolio";
 const previewPath = "assets/portfolio-preview.png";
 const sourceSha = process.env.PORTFOLIO_SOURCE_SHA || "manual";
+const cacheKey = process.env.PORTFOLIO_CACHE_KEY || sourceSha.slice(0, 12);
 
 await mkdir("assets", { recursive: true });
 
@@ -82,7 +83,7 @@ try {
     Object.assign(cue.style, {
       position: "fixed",
       right: "24px",
-      bottom: "24px",
+      top: "24px",
       zIndex: "2147483647",
       display: "flex",
       alignItems: "center",
@@ -116,7 +117,7 @@ try {
   const readme = await readFile("README.md", "utf8");
   const updatedReadme = readme.replace(
     /(portfolio-preview\.png\?v=)[^"')\s]+/g,
-    `$1${sourceSha.slice(0, 12)}`,
+    `$1${cacheKey}`,
   );
 
   if (updatedReadme !== readme) {

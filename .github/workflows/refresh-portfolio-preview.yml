@@ -71,6 +71,7 @@ jobs:
         if: steps.source.outputs.refresh == 'true'
         env:
           PORTFOLIO_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          PORTFOLIO_CACHE_KEY: ${{ github.run_id }}
         run: node scripts/capture-portfolio.mjs
 
       - name: Publish refreshed preview
