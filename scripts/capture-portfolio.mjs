@@ -12,7 +12,8 @@ const previewPaths = {
 const layoutHeight = 1000;
 const probeWidth = 1000;
 const targetVisiblePhotos = 1.75;
-const deviceScaleFactor = 3;
+const githubReadmeWidthAt1440p = 846;
+const targetDisplayDensity = 3;
 
 const themes = {
   light: {
@@ -23,10 +24,9 @@ const themes = {
     muted: "#59636e",
     rule: "#d1d9e0",
     linkLine: "#afb8c1",
-    cueBackground: "rgba(246, 248, 250, 0.96)",
+    cueBackground: "#ffffff",
     cueBorder: "#d1d9e0",
     cueAccent: "#0969da",
-    cueShadow: "0 10px 30px rgba(31, 35, 40, 0.12)",
   },
   dark: {
     background: "#0d1117",
@@ -36,10 +36,9 @@ const themes = {
     muted: "#8c959f",
     rule: "#30363d",
     linkLine: "#484f58",
-    cueBackground: "rgba(22, 27, 34, 0.96)",
+    cueBackground: "#0d1117",
     cueBorder: "#30363d",
     cueAccent: "#58a6ff",
-    cueShadow: "0 10px 30px rgba(1, 4, 9, 0.32)",
   },
 };
 
@@ -57,6 +56,10 @@ const browser = await chromium.launch({ headless: true });
 
 async function capture(themeName) {
   const theme = themes[themeName];
+  // GitHub renders this profile README at 846px on a 2560x1440 viewport.
+  // Matching an exact 3:1 source-to-display ratio avoids fractional resampling
+  // of the captured type while retaining ample density on smaller screens.
+  const deviceScaleFactor = githubReadmeWidthAt1440p * targetDisplayDensity / 592;
   const context = await browser.newContext({
     viewport: { width: probeWidth, height: layoutHeight },
     deviceScaleFactor,
@@ -116,6 +119,9 @@ async function capture(themeName) {
           background: ${theme.background} !important;
           scrollbar-width: none !important;
         }
+        body {
+          -webkit-font-smoothing: auto !important;
+        }
         ::-webkit-scrollbar {
           display: none !important;
         }
@@ -156,6 +162,7 @@ async function capture(themeName) {
     const crop = await page.evaluate(() => {
       window.scrollTo(0, 0);
 
+      const pageElement = document.querySelector(".page");
       const workSection = Array.from(document.querySelectorAll(".listing"))
         .find((section) => section.querySelector("h2")?.textContent.trim() === "Work Experience");
       const workItems = workSection ? Array.from(workSection.querySelectorAll(".item")) : [];
@@ -166,37 +173,48 @@ async function capture(themeName) {
       const track = document.querySelector(".track");
       const gap = track ? Number.parseFloat(getComputedStyle(track).columnGap) || 0 : 0;
 
-      if (!thirdItem || !secondRole || !firstPhoto || !column) {
+      if (!pageElement || !thirdItem || !secondRole || !firstPhoto || !column) {
         throw new Error("Could not find the portfolio elements needed for the crop.");
       }
 
-      const thirdItemTop = thirdItem.getBoundingClientRect().top;
+      const sideGutter = column.left;
+
+      // Use the measured side gutter as the spacing unit on every edge. Hide
+      // only the off-canvas third role so the enlarged lower gutter stays blank.
+      pageElement.style.paddingTop = `${sideGutter}px`;
+      thirdItem.style.visibility = "hidden";
+
+      const adjustedColumn = document.querySelector(".col").getBoundingClientRect();
       const secondRoleBottom = secondRole.getBoundingClientRect().bottom;
-      const cropHeight = Math.floor(thirdItemTop);
+      const cropHeight = Math.round(secondRoleBottom + sideGutter);
       const visiblePhotos = (window.innerWidth - firstPhoto.left - gap) / firstPhoto.width;
 
       return {
         cropHeight,
-        thirdItemTop,
         secondRoleBottom,
+        whitespaceAfterSecondRole: cropHeight - secondRoleBottom,
+        topWhitespace: adjustedColumn.top,
         thirdItemText: thirdItem.textContent.trim(),
         visiblePhotos,
-        leftGutter: column.left,
-        rightGutter: window.innerWidth - column.right,
+        leftGutter: adjustedColumn.left,
+        rightGutter: window.innerWidth - adjustedColumn.right,
       };
     });
 
     if (!crop.thirdItemText.startsWith("Queen Mary University of London")) {
       throw new Error(`Unexpected third work item: ${crop.thirdItemText}`);
     }
-    if (crop.cropHeight <= crop.secondRoleBottom) {
-      throw new Error("The crop would remove the whitespace below the second role.");
-    }
     if (Math.abs(crop.visiblePhotos - targetVisiblePhotos) > 0.01) {
       throw new Error(`Expected ${targetVisiblePhotos} visible photos, measured ${crop.visiblePhotos}.`);
     }
     if (Math.abs(crop.leftGutter - crop.rightGutter) > 0.5) {
       throw new Error(`Capture gutters are not balanced: ${crop.leftGutter}px / ${crop.rightGutter}px.`);
+    }
+    if (Math.abs(crop.topWhitespace - crop.leftGutter) > 0.5) {
+      throw new Error(`Top whitespace ${crop.topWhitespace}px does not match the ${crop.leftGutter}px side gutter.`);
+    }
+    if (Math.abs(crop.whitespaceAfterSecondRole - crop.leftGutter) > 0.5) {
+      throw new Error(`Bottom whitespace ${crop.whitespaceAfterSecondRole}px does not match the ${crop.leftGutter}px side gutter.`);
     }
 
     await page.evaluate(({ cropHeight, theme }) => {
@@ -230,8 +248,7 @@ async function capture(themeName) {
         background: theme.cueBackground,
         border: `1px solid ${theme.cueBorder}`,
         borderRadius: "999px",
-        boxShadow: theme.cueShadow,
-        backdropFilter: "blur(10px)",
+        boxShadow: "none",
         fontFamily: `Georgia, "Times New Roman", serif`,
         fontSize: "14px",
         lineHeight: "1",
@@ -257,7 +274,13 @@ async function capture(themeName) {
       scale: "device",
     });
 
-    return { themeName, captureWidth, ...crop };
+    return {
+      themeName,
+      captureWidth,
+      outputWidth: Math.round(captureWidth * deviceScaleFactor),
+      deviceScaleFactor,
+      ...crop,
+    };
   } finally {
     await context.close();
   }
@@ -281,7 +304,8 @@ try {
   await writeFile("README.md", readme, "utf8");
   console.log(JSON.stringify({
     sourceSha,
-    deviceScaleFactor,
+    githubReadmeWidthAt1440p,
+    targetDisplayDensity,
     targetVisiblePhotos,
     captures,
   }, null, 2));
