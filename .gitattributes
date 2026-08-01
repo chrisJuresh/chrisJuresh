@@ -1,0 +1,8 @@
+# The preview refresh runs on a Windows runner (it needs Sitka, which only ships with
+# Windows), so pin text to LF rather than letting the runner's git decide. README.md is
+# rewritten by scripts/capture-portfolio.mjs with \n, and portfolio-preview-source.txt
+# is compared byte-for-byte against `git ls-remote` output on the next run.
+* text=auto eol=lf
+
+*.png binary
+*.ttf binary

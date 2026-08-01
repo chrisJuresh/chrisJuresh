@@ -16,7 +16,16 @@ concurrency:
 
 jobs:
   refresh:
-    runs-on: ubuntu-latest
+    # Windows, not Ubuntu, for one reason: the portfolio is set in Sitka, which ships
+    # with Windows and is not redistributable, so it cannot be installed on a Linux
+    # runner or served as a webfont. On ubuntu-latest the whole stack — Sitka, Charter,
+    # Iowan Old Style, Georgia — resolved to nothing and the preview rendered in DejaVu
+    # Serif, so it never showed what visitors see. windows-latest (Server 2025, build
+    # 26100) carries SitkaVF.ttf plus Georgia and Constantia, so the preview now renders
+    # the real thing, old-style figures in the year column included.
+    # Costs about 15s more per refresh. Every expensive step is already gated on
+    # steps.source.outputs.refresh, so idle runs stay cheap.
+    runs-on: windows-latest
 
     steps:
       - name: Check out profile repository
@@ -71,7 +80,7 @@ jobs:
         if: steps.source.outputs.refresh == 'true'
         run: |
           npm install --no-save --no-package-lock playwright@1.61.1
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
 
       - name: Capture live portfolio
         if: steps.source.outputs.refresh == 'true'
@@ -87,6 +96,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # The runner is Windows now, so don't let git translate line endings on the
+          # way into the commit: capture-portfolio.mjs writes README.md with \n, and the
+          # sha file is compared byte-for-byte against `git ls-remote` output next run.
+          # .gitattributes pins this too; this is the belt to its braces.
+          git config core.autocrlf false
+          git config core.eol lf
 
           printf '%s\n' "$PORTFOLIO_SOURCE_SHA" > assets/portfolio-preview-source.txt
           git add -A -- README.md assets

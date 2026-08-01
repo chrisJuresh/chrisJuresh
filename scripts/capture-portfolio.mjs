@@ -87,6 +87,29 @@ async function capture(themeName) {
       if (document.fonts?.ready) await document.fonts.ready;
     });
 
+    // The whole reason this job runs on Windows: Sitka ships with the OS and cannot be
+    // installed anywhere else. If a runner image ever drops it, every face in the stack
+    // is missing and the page silently renders in a generic serif — a preview that looks
+    // fine and is wrong. Fail instead, loudly.
+    const fonts = await page.evaluate(() => {
+      const c = document.createElement("canvas").getContext("2d");
+      const width = (family) => { c.font = `100px ${family}`; return c.measureText("Handgloves 2024").width; };
+      const monospace = width("monospace");
+      return {
+        sitka: width('"Sitka Text", monospace') !== monospace,
+        georgia: width("Georgia, monospace") !== monospace,
+      };
+    });
+
+    const missing = Object.entries(fonts).filter(([, present]) => !present).map(([name]) => name);
+    if (missing.length) {
+      throw new Error(
+        `Runner is missing ${missing.join(" and ")}. The preview would render in a `
+        + `fallback face and misrepresent the site. Check the runner image still ships `
+        + `Sitka (it is Windows-only and not redistributable).`,
+      );
+    }
+
     await page.evaluate(() => {
       Array.from(document.querySelectorAll(".track img"))
         .slice(0, 3)
