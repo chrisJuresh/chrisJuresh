@@ -1,7 +1,9 @@
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 
-const portfolioUrl = "https://chrisj.uk/portfolio";
+// Overridable so the crop assertions can be replayed against a local checkout
+// before pushing portfolio changes; CI leaves it unset and hits production.
+const portfolioUrl = process.env.PORTFOLIO_URL || "https://chrisj.uk/portfolio";
 const sourceSha = process.env.PORTFOLIO_SOURCE_SHA || "manual";
 const cacheKey = process.env.PORTFOLIO_CACHE_KEY || sourceSha.slice(0, 12);
 const previewPaths = {
@@ -189,23 +191,29 @@ async function capture(themeName) {
       const workSection = Array.from(document.querySelectorAll(".listing"))
         .find((section) => section.querySelector("h2")?.textContent.trim() === "Work Experience");
       const workItems = workSection ? Array.from(workSection.querySelectorAll(".item")) : [];
-      const thirdItem = workItems[2];
       const secondRole = workItems[1]?.querySelector(".sub");
       const firstPhoto = document.querySelector(".slide")?.getBoundingClientRect();
       const column = document.querySelector(".col")?.getBoundingClientRect();
       const track = document.querySelector(".track");
       const gap = track ? Number.parseFloat(getComputedStyle(track).columnGap) || 0 : 0;
 
-      if (!pageElement || !thirdItem || !secondRole || !firstPhoto || !column) {
+      if (!pageElement || !workSection || !secondRole || !firstPhoto || !column) {
         throw new Error("Could not find the portfolio elements needed for the crop.");
       }
 
       const sideGutter = column.left;
 
       // Use the measured side gutter as the spacing unit on every edge. Hide
-      // only the off-canvas third role so the enlarged lower gutter stays blank.
+      // everything below the second role — any further roles, and every section
+      // after Work Experience — so the enlarged lower gutter stays blank.
+      // visibility:hidden, not display:none, so the crop measurements hold.
       pageElement.style.paddingTop = `${sideGutter}px`;
-      thirdItem.style.visibility = "hidden";
+      for (const item of workItems.slice(2)) item.style.visibility = "hidden";
+      let after = workSection.nextElementSibling;
+      while (after) {
+        after.style.visibility = "hidden";
+        after = after.nextElementSibling;
+      }
 
       const adjustedColumn = document.querySelector(".col").getBoundingClientRect();
       const secondRoleBottom = secondRole.getBoundingClientRect().bottom;
@@ -217,15 +225,15 @@ async function capture(themeName) {
         secondRoleBottom,
         whitespaceAfterSecondRole: cropHeight - secondRoleBottom,
         topWhitespace: adjustedColumn.top,
-        thirdItemText: thirdItem.textContent.trim(),
+        workItemCount: workItems.length,
         visiblePhotos,
         leftGutter: adjustedColumn.left,
         rightGutter: window.innerWidth - adjustedColumn.right,
       };
     });
 
-    if (!crop.thirdItemText.startsWith("Queen Mary University of London")) {
-      throw new Error(`Unexpected third work item: ${crop.thirdItemText}`);
+    if (crop.workItemCount < 2) {
+      throw new Error(`Work Experience needs at least 2 roles to crop against; found ${crop.workItemCount}.`);
     }
     if (Math.abs(crop.visiblePhotos - targetVisiblePhotos) > 0.01) {
       throw new Error(`Expected ${targetVisiblePhotos} visible photos, measured ${crop.visiblePhotos}.`);
