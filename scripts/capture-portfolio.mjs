@@ -4,6 +4,22 @@ import { chromium } from "playwright";
 // Overridable so the crop assertions can be replayed against a local checkout
 // before pushing portfolio changes; CI leaves it unset and hits production.
 const portfolioUrl = process.env.PORTFOLIO_URL || "https://chrisj.uk/portfolio";
+
+// The portfolio ships an effect stack — paper and film textures, a halftone dot
+// screen, chromatic fringing — declared in <html data-fx="..."> and overridable
+// with ?fx=. An empty value is not "no preference": it is the site's way of
+// saying none of them, and it is how this capture asks for the untreated page.
+//
+// It is asked for because the preview is not the site. This screenshot is
+// resampled to a fraction of its captured width and sits inside a GitHub README
+// on GitHub's own paper, where a texture meant to be felt at full size reads as
+// compression noise and the fringing reads as a rendering fault. The page keeps
+// all of it; only the picture of the page goes without.
+//
+// Only the fetch carries the query. The README's link is portfolioUrl as given,
+// so a visitor who clicks through lands on the treated site.
+const captureUrl = new URL(portfolioUrl);
+captureUrl.searchParams.set("fx", "");
 const sourceSha = process.env.PORTFOLIO_SOURCE_SHA || "manual";
 const cacheKey = process.env.PORTFOLIO_CACHE_KEY || sourceSha.slice(0, 12);
 const previewPaths = {
@@ -76,7 +92,7 @@ async function capture(themeName) {
       localStorage.removeItem("portfolio-theme");
     });
 
-    const response = await page.goto(portfolioUrl, {
+    const response = await page.goto(captureUrl.href, {
       waitUntil: "load",
       timeout: 60_000,
     });
@@ -109,6 +125,21 @@ async function capture(themeName) {
         `Runner is missing ${missing.join(" and ")}. The preview would render in a `
         + `fallback face and misrepresent the site. Check the runner image still ships `
         + `Sitka (it is Windows-only and not redistributable).`,
+      );
+    }
+
+    // ?fx= is a contract with a site this repo does not own, and a broken one is
+    // silent: the page would simply render with its textures on and every crop
+    // assertion below would still pass, because the stack is painted outside the
+    // column and changes no measurement. So read back what the page settled on
+    // and fail here instead of publishing a preview nobody asked for.
+    const activeEffects = await page.evaluate(
+      () => document.documentElement.getAttribute("data-fx") || "",
+    );
+    if (activeEffects.trim()) {
+      throw new Error(
+        `Portfolio kept the effects "${activeEffects.trim()}" despite ?fx=. The site's `
+        + `opt-out has moved; find what replaced it before this preview ships textured.`,
       );
     }
 
